@@ -33,5 +33,19 @@ class AttributeMap {
 
     fun has(key: AttributeKey<*>): Boolean = attributes.containsKey(key)
 
+    fun clear() {
+        attributes.clear()
+    }
+
+    fun removeIf(predicate: (AttributeKey<*>) -> Boolean) {
+        val iterator = attributes.iterator()
+        while (iterator.hasNext()) {
+            val attr = iterator.next()
+            if (predicate(attr.key)) {
+                iterator.remove()
+            }
+        }
+    }
+
     fun toPersistentMap(): Map<String, Any> = attributes.filterKeys { it.persistenceKey != null }.mapKeys { it.key.persistenceKey!! }
 }

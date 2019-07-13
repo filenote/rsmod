@@ -13,9 +13,7 @@ import gg.rsmod.game.model.entity.Player
 import gg.rsmod.game.model.queue.QueueTask
 import gg.rsmod.game.model.timer.ACTIVE_COMBAT_TIMER
 import gg.rsmod.game.model.timer.ATTACK_DELAY
-import gg.rsmod.plugins.api.BonusSlot
-import gg.rsmod.plugins.api.ProjectileType
-import gg.rsmod.plugins.api.WeaponType
+import gg.rsmod.plugins.api.*
 import gg.rsmod.plugins.api.ext.*
 import gg.rsmod.plugins.content.combat.strategy.CombatStrategy
 import gg.rsmod.plugins.content.combat.strategy.MagicCombatStrategy
@@ -59,8 +57,8 @@ object Combat {
         target.attr[LAST_HIT_BY_ATTR] = WeakReference(pawn)
 
         if (pawn.attr.has(CASTING_SPELL) && pawn is Player && pawn.getVarbit(SELECTED_AUTOCAST_VARBIT) == 0) {
-            pawn.attr.remove(CASTING_SPELL)
             reset(pawn)
+            pawn.attr.remove(CASTING_SPELL)
         }
 
         if (target is Player && target.interfaces.getModal() != -1) {
@@ -74,20 +72,29 @@ object Combat {
             return
         }
 
-        if (target.getType().isNpc()) {
-            if (!target.attr.has(COMBAT_TARGET_FOCUS_ATTR) || target.attr[COMBAT_TARGET_FOCUS_ATTR]!!.get() != pawn) {
-                target.attack(pawn)
-            }
-        } else if (target is Player) {
-            if (target.getVarp(AttackTab.DISABLE_AUTO_RETALIATE_VARP) == 0 && target.getCombatTarget() != pawn) {
-                target.attack(pawn)
+        val blockAnimation = CombatConfigs.getBlockAnimation(target)
+        target.animate(blockAnimation)
+
+        if (target.lock.canAttack()) {
+            if (target.entityType.isNpc) {
+                if (!target.attr.has(COMBAT_TARGET_FOCUS_ATTR) || target.attr[COMBAT_TARGET_FOCUS_ATTR]!!.get() != pawn) {
+                    target.attack(pawn)
+                }
+            } else if (target is Player) {
+                if (target.getVarp(AttackTab.DISABLE_AUTO_RETALIATE_VARP) == 0 && target.getCombatTarget() != pawn) {
+                    target.attack(pawn)
+                }
             }
         }
     }
 
     fun getNpcXpMultiplier(npc: Npc): Double {
-        val def = npc.combatDef
-        val averageLvl = Math.floor((def.attackLvl + def.strengthLvl + def.defenceLvl + def.hitpoints) / 4.0)
+        val attackLvl = npc.stats.getMaxLevel(NpcSkills.ATTACK)
+        val strengthLvl = npc.stats.getMaxLevel(NpcSkills.STRENGTH)
+        val defenceLvl = npc.stats.getMaxLevel(NpcSkills.DEFENCE)
+        val hitpoints = npc.getMaxHp()
+
+        val averageLvl = Math.floor((attackLvl + strengthLvl + defenceLvl + hitpoints) / 4.0)
         val averageDefBonus = Math.floor((npc.getBonus(BonusSlot.DEFENCE_STAB) + npc.getBonus(BonusSlot.DEFENCE_SLASH) + npc.getBonus(BonusSlot.DEFENCE_CRUSH)) / 3.0)
         return 1.0 + Math.floor(averageLvl * (averageDefBonus + npc.getStrengthBonus() + npc.getAttackBonus()) / 5120.0) / 40.0
     }
@@ -130,14 +137,15 @@ object Combat {
             return false
         }
 
-        // TODO: maxDistance should be 32 if in 'large' viewport mode
-        val maxDistance = 16
+        val maxDistance = when {
+            pawn is Player && pawn.hasLargeViewport() -> Player.LARGE_VIEW_DISTANCE
+            else -> Player.NORMAL_VIEW_DISTANCE
+        }
         if (!pawn.tile.isWithinRadius(target.tile, maxDistance)) {
             return false
         }
 
-        val pvp = pawn.getType().isPlayer() && target.getType().isPlayer()
-        val pvm = pawn.getType().isPlayer() && target.getType().isNpc()
+        val pvp = pawn.entityType.isPlayer && target.entityType.isPlayer
 
         if (pawn is Player) {
             if (!pawn.isOnline) {
@@ -163,8 +171,12 @@ object Combat {
             if (!target.isSpawned()) {
                 return false
             }
-            if (target.combatDef.hitpoints == -1) {
+            if (!target.def.isAttackable() || target.combatDef.hitpoints == -1) {
                 (pawn as? Player)?.message("You can't attack this npc.")
+                return false
+            }
+            if (pawn is Player && target.combatDef.slayerReq > pawn.getSkills().getMaxLevel(Skills.SLAYER)) {
+                pawn.message("You need a higher Slayer level to know how to wound this monster.")
                 return false
             }
         } else if (target is Player) {
@@ -175,13 +187,37 @@ object Combat {
             if (!target.lock.canBeAttacked()) {
                 return false
             }
-        }
 
-        if (pvp) {
-            // TODO: must be within combat lvl range
-            // TODO: make sure they're in wildy or in dangerous minigame
+            if (pvp) {
+                pawn as Player
+
+                if (!inPvpArea(pawn)) {
+                    pawn.message("You can't attack players here.")
+                    return false
+                }
+
+                if (!inPvpArea(target)) {
+                    pawn.message("You can't attack ${target.username} there.")
+                    return false
+                }
+
+                val combatLvlRange = getValidCombatLvlRange(pawn)
+                if (target.combatLevel !in combatLvlRange) {
+                    pawn.message("You can't attack ${target.username} - your level different is too great.")
+                    return false
+                }
+            }
         }
         return true
+    }
+
+    private fun inPvpArea(player: Player): Boolean = player.inWilderness()
+
+    private fun getValidCombatLvlRange(player: Player): IntRange {
+        val wildLvl = player.tile.getWildernessLevel()
+        val minLvl = Math.max(Skills.MIN_COMBAT_LVL, player.combatLevel - wildLvl)
+        val maxLvl = Math.min(Skills.MAX_COMBAT_LVL, player.combatLevel + wildLvl)
+        return minLvl..maxLvl
     }
 
     private fun getStrategy(combatClass: CombatClass): CombatStrategy = when (combatClass) {

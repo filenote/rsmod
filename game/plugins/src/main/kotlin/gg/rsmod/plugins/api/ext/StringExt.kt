@@ -1,9 +1,5 @@
 package gg.rsmod.plugins.api.ext
 
-/**
- * @author Tom <rspsmods@gmail.com>
- */
-
 private const val vowels = "aeiou"
 
 fun String.pluralPrefix(amount: Int) : String {
@@ -11,7 +7,7 @@ fun String.pluralPrefix(amount: Int) : String {
 }
 
 fun String.pluralSuffix(amount: Int): String {
-    if (endsWith('s')) {
+    if (endsWith('s', ignoreCase = true)) {
         return this
     }
     return if (amount != 1) this + "s" else this

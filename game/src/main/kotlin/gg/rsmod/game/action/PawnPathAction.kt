@@ -1,6 +1,7 @@
 package gg.rsmod.game.action
 
 import gg.rsmod.game.message.impl.SetMapFlagMessage
+import gg.rsmod.game.model.MovementQueue
 import gg.rsmod.game.model.Tile
 import gg.rsmod.game.model.attr.*
 import gg.rsmod.game.model.entity.Entity
@@ -21,6 +22,8 @@ import java.lang.ref.WeakReference
  * @author Tom <rspsmods@gmail.com>
  */
 object PawnPathAction {
+
+    private const val ITEM_USE_OPCODE = -1
 
     val walkPlugin: Plugin.() -> Unit = {
         val pawn = ctx as Pawn
@@ -48,6 +51,31 @@ object PawnPathAction {
         }
     }
 
+    val itemUsePlugin: Plugin.() -> Unit = s@ {
+        val pawn = ctx as Pawn
+        val world = pawn.world
+        val other = pawn.attr[INTERACTING_NPC_ATTR]?.get() ?: pawn.attr[INTERACTING_PLAYER_ATTR]?.get()!!
+
+        /*
+         * Some interactions only require line-of-sight range, such as npcs
+         * behind cells or booths. This allows for diagonal interaction.
+         *
+         * Set to null for default interaction range.
+         */
+        val lineOfSightRange = if (other is Npc) world.plugins.getNpcInteractionDistance(other.id) else null
+
+        pawn.queue(TaskPriority.STANDARD) {
+            terminateAction = {
+                pawn.stopMovement()
+                if (pawn is Player) {
+                    pawn.write(SetMapFlagMessage(255, 255))
+                }
+            }
+
+            walk(this, pawn, other, ITEM_USE_OPCODE, lineOfSightRange)
+        }
+    }
+
     private suspend fun walk(it: QueueTask, pawn: Pawn, other: Pawn, opt: Int, lineOfSightRange: Int?) {
         val world = pawn.world
         val initialTile = Tile(other.tile)
@@ -59,9 +87,9 @@ object PawnPathAction {
             pawn.movementQueue.clear()
             if (pawn is Player) {
                 when {
-                    pawn.timers.has(FROZEN_TIMER) -> pawn.message(Entity.MAGIC_STOPS_YOU_FROM_MOVING)
-                    pawn.timers.has(STUN_TIMER) -> pawn.message(Entity.YOURE_STUNNED)
-                    else -> pawn.message(Entity.YOU_CANT_REACH_THAT)
+                    pawn.timers.has(FROZEN_TIMER) -> pawn.writeMessage(Entity.MAGIC_STOPS_YOU_FROM_MOVING)
+                    pawn.timers.has(STUN_TIMER) -> pawn.writeMessage(Entity.YOURE_STUNNED)
+                    else -> pawn.writeMessage(Entity.YOU_CANT_REACH_THAT)
                 }
                 pawn.write(SetMapFlagMessage(255, 255))
             }
@@ -110,18 +138,24 @@ object PawnPathAction {
                 }
 
                 val npcId = other.getTransform(pawn)
-                val handled = world.plugins.executeNpc(pawn, npcId, opt)
+                val handled = if (opt != ITEM_USE_OPCODE) {
+                    world.plugins.executeNpc(pawn, npcId, opt)
+                } else {
+                    val item = pawn.attr[INTERACTING_ITEM]?.get() ?: return
+                    world.plugins.executeItemOnNpc(pawn, npcId, item.id)
+                }
+
                 if (!handled) {
-                    pawn.message(Entity.NOTHING_INTERESTING_HAPPENS)
+                    pawn.writeMessage(Entity.NOTHING_INTERESTING_HAPPENS)
                 }
             }
 
             if (other is Player) {
-                val option = other.options[opt - 1]
+                val option = pawn.options[opt - 1]
                 if (option != null) {
                     val handled = world.plugins.executePlayerOption(pawn, option)
                     if (!handled) {
-                        pawn.message(Entity.NOTHING_INTERESTING_HAPPENS)
+                        pawn.writeMessage(Entity.NOTHING_INTERESTING_HAPPENS)
                     }
                 }
             }
@@ -176,7 +210,7 @@ object PawnPathAction {
         }
 
         val route = pawn.createPathFindingStrategy().calculateRoute(builder.build())
-        pawn.walkPath(route.path)
+        pawn.walkPath(route.path, MovementQueue.StepType.NORMAL, detectCollision = true)
 
         while (!pawn.tile.sameAs(route.tail)) {
             if (!targetTile.sameAs(target.tile)) {
@@ -191,5 +225,4 @@ object PawnPathAction {
     private fun overlap(tile1: Tile, size1: Int, tile2: Tile, size2: Int): Boolean = AabbUtil.areOverlapping(tile1.x, tile1.z, size1, size1, tile2.x, tile2.z, size2, size2)
 
     private fun bordering(tile1: Tile, size1: Int, tile2: Tile, size2: Int): Boolean = AabbUtil.areBordering(tile1.x, tile1.z, size1, size1, tile2.x, tile2.z, size2, size2)
-
 }

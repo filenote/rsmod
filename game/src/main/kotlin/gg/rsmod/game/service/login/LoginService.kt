@@ -11,6 +11,8 @@ import gg.rsmod.game.service.GameService
 import gg.rsmod.game.service.Service
 import gg.rsmod.game.service.rsa.RsaService
 import gg.rsmod.game.service.serializer.PlayerSerializerService
+import gg.rsmod.game.service.world.SimpleWorldVerificationService
+import gg.rsmod.game.service.world.WorldVerificationService
 import gg.rsmod.game.system.GameSystem
 import gg.rsmod.net.codec.game.GamePacketDecoder
 import gg.rsmod.net.codec.game.GamePacketEncoder
@@ -39,17 +41,21 @@ class LoginService : Service {
      */
     val requests = LinkedBlockingQueue<LoginServiceRequest>()
 
-    override fun init(server: Server, world: World, serviceProperties: ServerProperties) {
-        serializer = world.getService(PlayerSerializerService::class.java, searchSubclasses = true)!!
+    private var threadCount = 1
 
-        val threadCount = serviceProperties.getOrDefault("thread-count", 3)
-        val executorService = Executors.newFixedThreadPool(threadCount, ThreadFactoryBuilder().setNameFormat("login-worker").setUncaughtExceptionHandler { t, e -> logger.error("Error with thread $t", e) }.build())
-        for (i in 0 until threadCount) {
-            executorService.execute(LoginWorker(this))
-        }
+    override fun init(server: Server, world: World, serviceProperties: ServerProperties) {
+        threadCount = serviceProperties.getOrDefault("thread-count", 3)
     }
 
     override fun postLoad(server: Server, world: World) {
+        serializer = world.getService(PlayerSerializerService::class.java, searchSubclasses = true)!!
+
+        val worldVerificationService = world.getService(WorldVerificationService::class.java, searchSubclasses = true) ?: SimpleWorldVerificationService()
+
+        val executorService = Executors.newFixedThreadPool(threadCount, ThreadFactoryBuilder().setNameFormat("login-worker").setUncaughtExceptionHandler { t, e -> logger.error("Error with thread $t", e) }.build())
+        for (i in 0 until threadCount) {
+            executorService.execute(LoginWorker(this, worldVerificationService))
+        }
     }
 
     override fun bindNet(server: Server, world: World) {
@@ -63,8 +69,10 @@ class LoginService : Service {
         requests.offer(serviceRequest)
     }
 
-    fun successfulLogin(client: Client, encodeRandom: IsaacRandom, decodeRandom: IsaacRandom) {
-        val gameSystem = GameSystem(channel = client.channel, client = client, service = client.world.getService(GameService::class.java)!!)
+    fun successfulLogin(client: Client, world: World, encodeRandom: IsaacRandom, decodeRandom: IsaacRandom) {
+        val gameSystem = GameSystem(
+                channel = client.channel, world = world, client = client,
+                service = client.world.getService(GameService::class.java)!!)
 
         client.gameSystem = gameSystem
         client.channel.attr(GameHandler.SYSTEM_KEY).set(gameSystem)
@@ -79,19 +87,21 @@ class LoginService : Service {
         val encoderIsaac = if (isaacEncryption) encodeRandom else null
         val decoderIsaac = if (isaacEncryption) decodeRandom else null
 
-        pipeline.remove("handshake_encoder")
-        pipeline.remove("login_decoder")
-        pipeline.remove("login_encoder")
+        if (client.channel.isActive) {
+            pipeline.remove("handshake_encoder")
+            pipeline.remove("login_decoder")
+            pipeline.remove("login_encoder")
 
-        pipeline.addFirst("packet_encoder", GamePacketEncoder(encoderIsaac))
-        pipeline.addAfter("packet_encoder", "message_encoder", GameMessageEncoder(gameSystem.service.messageEncoders, gameSystem.service.messageStructures))
+            pipeline.addFirst("packet_encoder", GamePacketEncoder(encoderIsaac))
+            pipeline.addAfter("packet_encoder", "message_encoder", GameMessageEncoder(gameSystem.service.messageEncoders, gameSystem.service.messageStructures))
 
-        pipeline.addBefore("handler", "packet_decoder",
-                GamePacketDecoder(decoderIsaac, PacketMetadata(gameSystem.service.messageStructures)))
+            pipeline.addBefore("handler", "packet_decoder",
+                    GamePacketDecoder(decoderIsaac, PacketMetadata(gameSystem.service.messageStructures)))
 
-        client.login()
-        client.channel.flush()
+            client.login()
+            client.channel.flush()
+        }
     }
 
-    companion object: KLogging()
+    companion object : KLogging()
 }

@@ -9,6 +9,7 @@ import gg.rsmod.game.model.shop.Shop
 import gg.rsmod.game.model.shop.ShopCurrency
 import gg.rsmod.game.model.shop.ShopItem
 import gg.rsmod.plugins.api.cfg.Items
+import gg.rsmod.plugins.api.ext.message
 
 /**
  * @author Tom <rspsmods@gmail.com>
@@ -39,9 +40,9 @@ open class ItemCurrency(private val currencyItem: Int, private val singularCurre
         return AcceptItemState(acceptable = true, errorMessage = "")
     }
 
-    override fun onSellValueMessage(p: Player, item: Int) {
-        val unnoted = Item(item).toUnnoted(p.world.definitions)
-        val value = getSellPrice(p.world, unnoted.id)
+    override fun onSellValueMessage(p: Player, shopItem: ShopItem) {
+        val unnoted = Item(shopItem.item).toUnnoted(p.world.definitions)
+        val value = shopItem.sellPrice ?: getSellPrice(p.world, unnoted.id)
         val name = unnoted.getName(p.world.definitions)
         val currency = if (value != 1) pluralCurrency else singularCurrency
         p.message("$name: currently costs $value $currency")
@@ -51,7 +52,8 @@ open class ItemCurrency(private val currencyItem: Int, private val singularCurre
         val unnoted = Item(item).toUnnoted(p.world.definitions)
         val acceptance = canAcceptItem(shop, p.world, unnoted.id)
         if (acceptance.acceptable) {
-            val value = getBuyPrice(p.world, unnoted.id)
+            val shopItem = shop.items.filterNotNull().firstOrNull { it.item == item}
+            val value = shopItem?.buyPrice ?: getBuyPrice(p.world, unnoted.id)
             val name = unnoted.getName(p.world.definitions)
             val currency = if (value != 1) pluralCurrency else singularCurrency
             p.message("$name: shop will buy for $value $currency")
@@ -67,7 +69,7 @@ open class ItemCurrency(private val currencyItem: Int, private val singularCurre
     override fun sellToPlayer(p: Player, shop: Shop, slot: Int, amt: Int) {
         val shopItem = shop.items[slot] ?: return
 
-        val currencyCost = getSellPrice(p.world, shopItem.item)
+        val currencyCost = shopItem.sellPrice ?: getSellPrice(p.world, shopItem.item)
         val currencyCount = p.inventory.getItemCount(currencyItem)
 
         var amount = Math.min(Math.floor(currencyCount.toDouble() / currencyCost.toDouble()).toInt(), amt)
@@ -117,6 +119,14 @@ open class ItemCurrency(private val currencyItem: Int, private val singularCurre
 
         if (add.completed > 0 && shopItem.amount != Int.MAX_VALUE) {
             shop.items[slot]!!.currentAmount -= add.completed
+
+            /*
+             * Check if the item is temporary and should be removed from the shop.
+             */
+            if (shop.items[slot]?.amount == 0 && shop.items[slot]?.isTemporary == true) {
+                shop.items[slot] = null
+            }
+
             shop.refresh(p.world)
         }
     }
@@ -132,7 +142,8 @@ open class ItemCurrency(private val currencyItem: Int, private val singularCurre
         }
 
         val shopSlot = shop.items.indexOfFirst { it?.item == unnoted }
-        val count = if (shopSlot != -1) shop.items[shopSlot]?.currentAmount ?: 0 else 0
+        val shopItem = if (shopSlot != -1) shop.items[shopSlot] else null
+        val count = shopItem?.currentAmount ?: 0
 
         val amount = Math.min(Math.min(p.inventory.getItemCount(item.id), amt), Int.MAX_VALUE - count)
 
@@ -146,7 +157,8 @@ open class ItemCurrency(private val currencyItem: Int, private val singularCurre
             return
         }
 
-        val compensation = Math.min(Int.MAX_VALUE.toLong(), getBuyPrice(p.world, unnoted).toLong() * remove.completed.toLong()).toInt()
+        val price = shopItem?.buyPrice ?: getBuyPrice(p.world, unnoted)
+        val compensation = Math.min(Int.MAX_VALUE.toLong(), price.toLong() * remove.completed.toLong()).toInt()
         val add = p.inventory.add(item = currencyItem, amount = compensation, assureFullInsertion = true)
         if (add.requested > 0 && add.completed > 0 || compensation == 0) {
             if (shopSlot != -1) {

@@ -95,7 +95,7 @@ class PlayerUpdateBlockSegment(val other: Player, private val newPlayer: Boolean
             UpdateBlockType.MOVEMENT -> {
                 val structure = blocks.updateBlocks[blockType]!!.values
                 buf.put(structure[0].type, structure[0].order, structure[0].transformation,
-                        if (other.teleport) 127 else if (other.steps?.runDirection != null) 2 else 1)
+                        if (other.blockBuffer.teleport) 127 else if (other.steps?.runDirection != null) 2 else 1)
             }
 
             UpdateBlockType.FACE_TILE -> {
@@ -115,7 +115,7 @@ class PlayerUpdateBlockSegment(val other: Player, private val newPlayer: Boolean
 
             UpdateBlockType.APPEARANCE -> {
                 val appBuf = GamePacketBuilder()
-                appBuf.put(DataType.BYTE, other.gender.id)
+                appBuf.put(DataType.BYTE, other.appearance.gender.id)
                 appBuf.put(DataType.BYTE, other.skullIcon)
                 appBuf.put(DataType.BYTE, other.prayerIcon)
 
@@ -154,7 +154,7 @@ class PlayerUpdateBlockSegment(val other: Player, private val newPlayer: Boolean
                             if (translation[i] == -1) {
                                 appBuf.put(DataType.BYTE, 0)
                             } else {
-                                appBuf.put(DataType.SHORT, 0x100 + other.looks[translation[i]])
+                                appBuf.put(DataType.SHORT, 0x100 + other.appearance.looks[translation[i]])
                             }
                         }
                     }
@@ -164,7 +164,7 @@ class PlayerUpdateBlockSegment(val other: Player, private val newPlayer: Boolean
                 }
 
                 for (i in 0 until 5) {
-                    val color = Math.max(0, other.lookColors[i])
+                    val color = Math.max(0, other.appearance.colors[i])
                     appBuf.put(DataType.BYTE, color)
                 }
 
@@ -193,7 +193,7 @@ class PlayerUpdateBlockSegment(val other: Player, private val newPlayer: Boolean
                 }
 
                 appBuf.putString(other.username)
-                appBuf.put(DataType.BYTE, other.getSkills().combatLevel)
+                appBuf.put(DataType.BYTE, other.combatLevel)
                 appBuf.put(DataType.SHORT, 0)
                 appBuf.put(DataType.BYTE, 0)
 
@@ -277,6 +277,17 @@ class PlayerUpdateBlockSegment(val other: Player, private val newPlayer: Boolean
                 val structure = blocks.updateBlocks[blockType]!!.values
                 buf.put(structure[0].type, structure[0].order, structure[0].transformation, other.blockBuffer.graphicId)
                 buf.put(structure[1].type, structure[1].order, structure[1].transformation, (other.blockBuffer.graphicHeight shl 16) or other.blockBuffer.graphicDelay)
+            }
+
+            UpdateBlockType.FORCE_MOVEMENT -> {
+                val structure = blocks.updateBlocks[blockType]!!.values
+                buf.put(structure[0].type, structure[0].order, structure[0].transformation, other.blockBuffer.forceMovement.diffX1)
+                buf.put(structure[1].type, structure[1].order, structure[1].transformation, other.blockBuffer.forceMovement.diffZ1)
+                buf.put(structure[2].type, structure[2].order, structure[2].transformation, other.blockBuffer.forceMovement.diffX2)
+                buf.put(structure[3].type, structure[3].order, structure[3].transformation, other.blockBuffer.forceMovement.diffZ2)
+                buf.put(structure[4].type, structure[4].order, structure[4].transformation, other.blockBuffer.forceMovement.clientDuration1)
+                buf.put(structure[5].type, structure[5].order, structure[5].transformation, other.blockBuffer.forceMovement.clientDuration2)
+                buf.put(structure[6].type, structure[6].order, structure[6].transformation, other.blockBuffer.forceMovement.directionAngle)
             }
 
             else -> throw RuntimeException("Unhandled update block type: $blockType")

@@ -21,14 +21,20 @@ import gg.rsmod.plugins.service.marketvalue.ItemMarketValueService
 import gg.rsmod.util.BitManipulation
 
 /**
- * A decoupled file that holds extensions and helper functions, related to players,
- * that can be used throughout plugins.
- *
- * @author Tom <rspsmods@gmail.com>
+ * The interface key used by inventory overlays
  */
+const val INVENTORY_INTERFACE_KEY = 93
+
+/**
+ * The id of the script used to initialise the interface overlay options. The 'big' variant of this script
+ * is used as it supports up to eight options rather than five.
+ *
+ * https://github.com/RuneStar/cs2-scripts/blob/master/scripts/[clientscript,interface_inv_init_big].cs2
+ */
+const val INTERFACE_INV_INIT_BIG = 150
 
 fun Player.openShop(shop: String) {
-    val s = world.shops[shop]
+    val s = world.getShop(shop)
     if (s != null) {
         attr[CURRENT_SHOP_ATTR] = s
         shopDirty = true
@@ -43,12 +49,12 @@ fun Player.openShop(shop: String) {
     }
 }
 
-fun Player.message(message: String, type: ChatMessageType = ChatMessageType.CONSOLE) {
-    write(MessageGameMessage(type = type.id, message = message, username = null))
+fun Player.message(message: String, type: ChatMessageType = ChatMessageType.CONSOLE, username: String? = null) {
+    write(MessageGameMessage(type = type.id, message = message, username = username))
 }
 
 fun Player.filterableMessage(message: String) {
-    write(MessageGameMessage(type = ChatMessageType.FILTERED.id, message = message, username = null))
+    write(MessageGameMessage(type = ChatMessageType.SPAM.id, message = message, username = null))
 }
 
 fun Player.runClientScript(id: Int, vararg args: Any) {
@@ -145,6 +151,9 @@ fun Player.openInterface(parent: Int, child: Int, interfaceId: Int, type: Int = 
 }
 
 fun Player.closeInterface(interfaceId: Int) {
+    if (interfaceId == interfaces.getModal()) {
+        interfaces.setModal(-1)
+    }
     val hash = interfaces.close(interfaceId)
     if (hash != -1) {
         write(IfCloseSubMessage(hash))
@@ -228,21 +237,49 @@ fun Player.openOverlayInterface(displayMode: DisplayMode) {
     write(IfOpenTopMessage(component))
 }
 
-fun Player.sendItemContainer(key: Int, container: ItemContainer) {
-    write(UpdateInvFullMessage(containerKey = key, items = container.rawItems))
+fun Player.sendItemContainer(key: Int, items: Array<Item?>) {
+    write(UpdateInvFullMessage(containerKey = key, items = items))
 }
 
-fun Player.sendItemContainer(parent: Int, child: Int, container: ItemContainer) {
-    write(UpdateInvFullMessage(parent = parent, child = child, items = container.rawItems))
+fun Player.sendItemContainer(interfaceId: Int, component: Int, items: Array<Item?>) {
+    write(UpdateInvFullMessage(interfaceId = interfaceId, component = component, items = items))
 }
 
-fun Player.sendItemContainer(parent: Int, child: Int, key: Int, container: ItemContainer) {
-    write(UpdateInvFullMessage(parent = parent, child = child, containerKey = key, items = container.rawItems))
+fun Player.sendItemContainer(interfaceId: Int, component: Int, key: Int, items: Array<Item?>) {
+    write(UpdateInvFullMessage(interfaceId = interfaceId, component = component, containerKey = key, items = items))
 }
 
-fun Player.updateItemContainer(key: Int, container: ItemContainer) {
-    // TODO: UpdateInvPartialMessage
-    write(UpdateInvFullMessage(containerKey = key, items = container.rawItems))
+fun Player.sendItemContainer(key: Int, container: ItemContainer) = sendItemContainer(key, container.rawItems)
+
+fun Player.sendItemContainer(interfaceId: Int, component: Int, container: ItemContainer) = sendItemContainer(interfaceId, component, container.rawItems)
+
+fun Player.sendItemContainer(interfaceId: Int, component: Int, key: Int, container: ItemContainer) = sendItemContainer(interfaceId, component, key, container.rawItems)
+
+fun Player.updateItemContainer(interfaceId: Int, component: Int, oldItems: Array<Item?>, newItems: Array<Item?>) {
+    write(UpdateInvPartialMessage(interfaceId = interfaceId, component = component, oldItems = oldItems, newItems = newItems))
+}
+
+fun Player.updateItemContainer(interfaceId: Int, component: Int, key: Int, oldItems: Array<Item?>, newItems: Array<Item?>) {
+    write(UpdateInvPartialMessage(interfaceId = interfaceId, component = component, containerKey = key, oldItems = oldItems, newItems = newItems))
+}
+
+fun Player.updateItemContainer(key: Int, oldItems: Array<Item?>, newItems: Array<Item?>) {
+    write(UpdateInvPartialMessage(containerKey = key, oldItems = oldItems, newItems = newItems))
+}
+
+/**
+ * Sends a container type referred to as 'invother' in CS2, which is used for displaying a second container with
+ * the same container key. An example of this is the trade accept screen, where the list of items being traded is stored
+ * in container 90 for both the player's container, and the partner's container. A container becomes 'invother' when it's
+ * component hash is less than -70000, which internally translates the container key to (key + 32768). We can achieve this by either
+ * sending a component hash of less than -70000, or by setting the key ourselves. I feel like the latter makes more sense.
+ *
+ * Special thanks to Polar for explaining this concept to me.
+ *
+ * https://github.com/RuneStar/cs2-scripts/blob/a144f1dceb84c3efa2f9e90648419a11ee48e7a2/scripts/script768.cs2
+ */
+fun Player.sendItemContainerOther(key: Int, container: ItemContainer) {
+    write(UpdateInvFullMessage(containerKey = key + 32768, items = container.rawItems))
 }
 
 fun Player.sendRunEnergy(energy: Int) {
@@ -350,6 +387,8 @@ fun Player.hasSpellbook(book: Spellbook): Boolean = getVarbit(4070) == book.id
 
 fun Player.getSpellbook(): Spellbook = Spellbook.values.first { getVarbit(4070) == it.id }
 
+fun Player.setSpellbook(book: Spellbook) = setVarbit(4070, book.id)
+
 fun Player.getWeaponType(): Int = getVarbit(357)
 
 fun Player.getAttackStyle(): Int = getVarp(43)
@@ -387,7 +426,7 @@ fun Player.sendWorldMapTile() {
 }
 
 fun Player.sendCombatLevelText() {
-    setComponentText(593, 2, "Combat Lvl: ${getSkills().combatLevel}")
+    setComponentText(593, 2, "Combat Lvl: $combatLevel")
 }
 
 fun Player.sendWeaponComponentInformation() {
@@ -411,7 +450,7 @@ fun Player.sendWeaponComponentInformation() {
 }
 
 fun Player.calculateAndSetCombatLevel(): Boolean {
-    val old = getSkills().combatLevel
+    val old = combatLevel
 
     val attack = getSkills().getMaxLevel(Skills.ATTACK)
     val defence = getSkills().getMaxLevel(Skills.DEFENCE)
@@ -423,12 +462,13 @@ fun Player.calculateAndSetCombatLevel(): Boolean {
 
     val base = Ints.max(strength + attack, magic * 2, ranged * 2)
 
-    getSkills().combatLevel = ((base * 1.3 + defence + hitpoints + prayer / 2) / 4).toInt()
+    combatLevel = ((base * 1.3 + defence + hitpoints + prayer / 2) / 4).toInt()
 
-    val changed = getSkills().combatLevel != old
+    val changed = combatLevel != old
     if (changed) {
-        runClientScript(389, getSkills().combatLevel)
+        runClientScript(389, combatLevel)
         sendCombatLevelText()
+        addBlock(UpdateBlockType.APPEARANCE)
         return true
     }
 
@@ -447,10 +487,10 @@ fun Player.calculateDeathContainers(): DeathContainers {
     var totalItems = inventory.rawItems.filterNotNull() + equipment.rawItems.filterNotNull()
     val valueService = world.getService(ItemMarketValueService::class.java)
 
-    if (valueService != null) {
-        totalItems = totalItems.sortedByDescending { valueService.get(it.id) }
+    totalItems = if (valueService != null) {
+        totalItems.sortedBy { it.id }.sortedWith(compareByDescending { valueService.get(it.id) })
     } else {
-        totalItems = totalItems.sortedByDescending { world.definitions.getNullable(ItemDef::class.java, it.id)?.cost ?: 0 }
+        totalItems.sortedBy { it.id }.sortedWith(compareByDescending { world.definitions.get(ItemDef::class.java, it.id).cost })
     }
 
     totalItems.forEach { item ->
@@ -468,7 +508,9 @@ fun Player.calculateDeathContainers(): DeathContainers {
     return DeathContainers(kept = keptContainer, lost = lostContainer)
 }
 
-fun Player.hasItem(item: Int, amount: Int = 1) : ItemContainer? = containers.values.firstOrNull { container -> container.getItemCount(item) >= amount }
+// Note: this does not take ground items, that may belong to the player, into
+// account.
+fun Player.hasItem(item: Int, amount: Int = 1): Boolean = containers.values.firstOrNull { container -> container.getItemCount(item) >= amount } != null
 
 fun Player.isPrivilegeEligible(to: String): Boolean = world.privileges.isEligible(privilege, to)
 

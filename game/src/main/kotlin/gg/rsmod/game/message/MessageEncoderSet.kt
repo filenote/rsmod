@@ -44,6 +44,7 @@ class MessageEncoderSet {
         put(UpdateRunEnergyEncoder(), UpdateRunEnergyMessage::class.java)
         put(SetMapFlagEncoder(), SetMapFlagMessage::class.java)
         put(UpdateInvFullEncoder(), UpdateInvFullMessage::class.java)
+        put(UpdateInvPartialEncoder(), UpdateInvPartialMessage::class.java)
         put(UpdateZonePartialFollowsEncoder(), UpdateZonePartialFollowsMessage::class.java)
         put(LodAddChangeEncoder(), LocAddChangeMessage::class.java)
         put(LocDelEncoder(), LocDelMessage::class.java)
@@ -57,14 +58,15 @@ class MessageEncoderSet {
         put(SoundAreaEncoder(), SoundAreaMessage::class.java)
         put(MidiSongEncoder(), MidiSongMessage::class.java)
         put(OnDialogAbortEncoder(), TriggerOnDialogAbortMessage::class.java)
+        put(UpdateRebootTimerEncoder(), UpdateRebootTimerMessage::class.java)
     }
 
-    private fun <T: Message> put(encoder: MessageEncoder<T>, message: Class<out T>) {
+    private fun <T : Message> put(encoder: MessageEncoder<T>, message: Class<out T>) {
         encoders[message] = encoder
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun <T: Message> get(type: Class<out T>): MessageEncoder<Message>? {
+    fun <T : Message> get(type: Class<out T>): MessageEncoder<Message>? {
         return encoders[type] as? MessageEncoder<Message>
     }
 }

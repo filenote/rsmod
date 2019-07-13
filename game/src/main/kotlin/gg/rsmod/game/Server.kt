@@ -4,10 +4,12 @@ import com.google.common.base.Stopwatch
 import gg.rsmod.game.model.Tile
 import gg.rsmod.game.model.World
 import gg.rsmod.game.model.entity.GroundItem
+import gg.rsmod.game.model.entity.Npc
 import gg.rsmod.game.model.skill.SkillSet
 import gg.rsmod.game.protocol.ClientChannelInitializer
 import gg.rsmod.game.service.GameService
 import gg.rsmod.game.service.rsa.RsaService
+import gg.rsmod.game.service.xtea.XteaKeyService
 import gg.rsmod.util.ServerProperties
 import io.netty.bootstrap.ServerBootstrap
 import io.netty.channel.ChannelOption
@@ -94,9 +96,11 @@ class Server {
                 playerLimit = gameProperties.getOrDefault("max-players", 2048),
                 home = Tile(gameProperties.get<Int>("home-x")!!, gameProperties.get<Int>("home-z")!!, gameProperties.getOrDefault("home-height", 0)),
                 skillCount = gameProperties.getOrDefault("skill-count", SkillSet.DEFAULT_SKILL_COUNT),
+                npcStatCount = gameProperties.getOrDefault("npc-stat-count", Npc.Stats.DEFAULT_NPC_STAT_COUNT),
                 runEnergy = gameProperties.getOrDefault("run-energy", true),
                 gItemPublicDelay = gameProperties.getOrDefault("gitem-public-spawn-delay", GroundItem.DEFAULT_PUBLIC_SPAWN_CYCLES),
-                gItemDespawnDelay = gameProperties.getOrDefault("gitem-despawn-delay", GroundItem.DEFAULT_DESPAWN_CYCLES))
+                gItemDespawnDelay = gameProperties.getOrDefault("gitem-despawn-delay", GroundItem.DEFAULT_DESPAWN_CYCLES),
+                preloadMaps = gameProperties.getOrDefault("preload-maps", false))
 
         val devContext = DevContext(
                 debugExamines = devProperties.getOrDefault("debug-examines", false),
@@ -105,7 +109,7 @@ class Server {
                 debugItemActions = devProperties.getOrDefault("debug-items", false),
                 debugMagicSpells = devProperties.getOrDefault("debug-spells", false))
 
-        val world = World(this, gameContext, devContext)
+        val world = World(gameContext, devContext)
 
         /*
          * Load the file store.
@@ -113,14 +117,27 @@ class Server {
         individualStopwatch.reset().start()
         world.filestore = Store(filestore.toFile())
         world.filestore.load()
-        world.definitions.loadAll(world.filestore)
         logger.info("Loaded filestore from path {} in {}ms.", filestore, individualStopwatch.elapsed(TimeUnit.MILLISECONDS))
+
+        /*
+         * Load the definitions.
+         */
+        world.definitions.loadAll(world.filestore)
 
         /*
          * Load the services required to run the server.
          */
         world.loadServices(this, gameProperties)
         world.init()
+
+        if (gameContext.preloadMaps) {
+            /*
+             * Preload region definitions.
+             */
+            world.getService(XteaKeyService::class.java)?.let { service ->
+                world.definitions.loadRegions(world, world.chunks, service.validRegions)
+            }
+        }
 
         /*
          * Load the packets for the game.
@@ -152,6 +169,7 @@ class Server {
          */
         individualStopwatch.reset().start()
         world.plugins.init(
+                server = this, world = world,
                 jarPluginsDirectory = gameProperties.getOrDefault("plugin-packed-path", "./plugins"))
         logger.info("Loaded {} plugins in {}ms.", DecimalFormat().format(world.plugins.getPluginCount()), individualStopwatch.elapsed(TimeUnit.MILLISECONDS))
 
@@ -202,5 +220,5 @@ class Server {
 
     fun getApiSite(): String = apiProperties.getOrDefault("org-site", "rspsmods.com")
 
-    companion object: KLogging()
+    companion object : KLogging()
 }

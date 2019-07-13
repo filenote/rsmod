@@ -4,6 +4,7 @@ import gg.rsmod.game.model.Tile
 import gg.rsmod.game.model.World
 import gg.rsmod.game.model.collision.CollisionMatrix
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap
 
 /**
  * Stores and exposes [Chunk]s.
@@ -39,9 +40,9 @@ class ChunkSet(val world: World) {
         return newSet
     }
 
-    private val chunks = hashMapOf<ChunkCoords, Chunk>()
+    private val chunks = Object2ObjectOpenHashMap<ChunkCoords, Chunk>()
 
-    private val activeRegions = IntOpenHashSet()
+    internal val activeRegions = IntOpenHashSet()
 
     fun getActiveChunkCount(): Int = chunks.size
 

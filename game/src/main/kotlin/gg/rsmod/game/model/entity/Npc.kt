@@ -21,6 +21,11 @@ class Npc private constructor(val id: Int, world: World, val spawnTile: Tile) : 
         this.tile = tile
     }
 
+    constructor(owner: Player, id: Int, tile: Tile, world: World) : this(id, world, spawnTile = Tile(tile)) {
+        this.tile = tile
+        this.owner = owner
+    }
+
     /**
      * This flag indicates whether or not this npc's AI should be processed.
      *
@@ -29,6 +34,14 @@ class Npc private constructor(val id: Int, world: World, val spawnTile: Tile) : 
      * the AI.
      */
     private var active = false
+
+    /**
+     * The owner of an npc will be the only [Player] who can view this npc.
+     * If the owner is no longer online, this npc will be removed from the world.
+     *
+     * @see [gg.rsmod.game.task.WorldRemoveTask]
+     */
+    var owner: Player? = null
 
     /**
      * This flag indicates whether or not this npc will respawn after death.
@@ -68,13 +81,34 @@ class Npc private constructor(val id: Int, world: World, val spawnTile: Tile) : 
     var combatStyle = CombatStyle.STAB
 
     /**
+     * The [Stats] for this npc.
+     */
+    var stats = Stats(world.gameContext.npcStatCount)
+
+    /**
      * Check if the npc will be aggressive towards the parameter player.
      */
     var aggroCheck: ((Npc, Player) -> Boolean)? = null
 
-    val name: String get() = getDef().name
+    /**
+     * Gets the [NpcDef] corresponding to our [id].
+     */
+    val def: NpcDef = world.definitions.get(NpcDef::class.java, id)
 
-    override fun getType(): EntityType = EntityType.NPC
+    /**
+     * Getter property for our npc name.
+     */
+    val name: String
+        get() = def.name
+
+    /**
+     * Getter property for a set of any species that our npc may be categorised
+     * as.
+     */
+    val species: Set<Any>
+        get() = combatDef.species
+
+    override val entityType: EntityType = EntityType.NPC
 
     override fun isRunning(): Boolean = false
 
@@ -99,7 +133,9 @@ class Npc private constructor(val id: Int, world: World, val spawnTile: Tile) : 
     }
 
     override fun cycle() {
-        timerCycle()
+        if (timers.isNotEmpty) {
+            timerCycle()
+        }
         hitsCycle()
     }
 
@@ -111,8 +147,6 @@ class Npc private constructor(val id: Int, world: World, val spawnTile: Tile) : 
      * [NpcDef.transforms] and [NpcDef.varp]/[NpcDef.varbit].
      */
     fun getTransform(player: Player): Int {
-        val def = getDef()
-
         if (def.varbit != -1) {
             val varbitDef = world.definitions.get(VarbitDef::class.java, def.varbit)
             val state = player.varps.getBit(varbitDef.varp, varbitDef.startBit, varbitDef.endBit)
@@ -128,14 +162,14 @@ class Npc private constructor(val id: Int, world: World, val spawnTile: Tile) : 
     }
 
     /**
-     * @see active
+     * @see [Npc.active]
      */
     fun setActive(active: Boolean) {
         this.active = active
     }
 
     /**
-     * @see active
+     * @see [Npc.active]
      */
     fun isActive(): Boolean = active
 
@@ -144,14 +178,94 @@ class Npc private constructor(val id: Int, world: World, val spawnTile: Tile) : 
      */
     fun isSpawned(): Boolean = index > 0
 
-    /**
-     * Gets the [NpcDef] corresponding to our [id].
-     */
-    fun getDef(): NpcDef = world.definitions.get(NpcDef::class.java, id)
-
-    override fun toString(): String = MoreObjects.toStringHelper(this).add("id", id).add("name", getDef().name).add("index", index).add("active", active).toString()
+    override fun toString(): String = MoreObjects.toStringHelper(this).add("id", id).add("name", name).add("index", index).add("active", active).toString()
 
     companion object {
         internal const val RESET_PAWN_FACE_DELAY = 25
+    }
+
+    /**
+     * @param nStats the max amount of stats an npc has.
+     */
+    class Stats(val nStats: Int) {
+
+        private val currentLevels = Array(nStats) { 1 }
+
+        private val maxLevels = Array(nStats) { 1 }
+
+        fun getCurrentLevel(skill: Int): Int = currentLevels[skill]
+
+        fun getMaxLevel(skill: Int): Int = maxLevels[skill]
+
+        fun setCurrentLevel(skill: Int, level: Int) {
+            currentLevels[skill] = level
+        }
+
+        fun setMaxLevel(skill: Int, level: Int) {
+            maxLevels[skill] = level
+        }
+
+        /**
+         * Alters the current level of the skill by adding [value] onto it.
+         *
+         * @param skill the skill level to alter.
+         *
+         * @param value the value which to add onto the current skill level.
+         * This value can be negative to decrement the level.
+         *
+         * @param capValue the amount of levels which can be surpass the max
+         * level in the skill. For example, if this value is set to [3] on a
+         * skill that has is [99], that means that the level can be altered
+         * from [99] to [102].
+         */
+        fun alterCurrentLevel(skill: Int, value: Int, capValue: Int = 0) {
+            check(capValue == 0 || capValue < 0 && value < 0 || capValue > 0 && value >= 0) {
+                "Cap value and alter value must always be the same signum (+ or -)."
+            }
+            val altered = when {
+                capValue > 0 -> Math.min(getCurrentLevel(skill) + value, getMaxLevel(skill) + capValue)
+                capValue < 0 -> Math.max(getCurrentLevel(skill) + value, getMaxLevel(skill) + capValue)
+                else -> Math.min(getMaxLevel(skill), getCurrentLevel(skill) + value)
+            }
+            val newLevel = Math.max(0, altered)
+            val curLevel = getCurrentLevel(skill)
+
+            if (newLevel != curLevel) {
+                setCurrentLevel(skill = skill, level = newLevel)
+            }
+        }
+
+        /**
+         * Decrease the level of [skill].
+         *
+         * @param skill the skill level to alter.
+         *
+         * @param value the amount of levels which to decrease from [skill], as a
+         * positive number.
+         *
+         * @param capped if true, the [skill] level cannot decrease further than
+         * [getMaxLevel] - [value].
+         */
+        fun decrementCurrentLevel(skill: Int, value: Int, capped: Boolean) = alterCurrentLevel(skill, -value, if (capped) -value else 0)
+
+        /**
+         * Increase the level of [skill].
+         *
+         * @param skill the skill level to alter.
+         *
+         * @param value the amount of levels which to increase from [skill], as a
+         * positive number.
+         *
+         * @param capped if true, the [skill] level cannot increase further than
+         * [getMaxLevel].
+         */
+        fun incrementCurrentLevel(skill: Int, value: Int, capped: Boolean) = alterCurrentLevel(skill, value, if (capped) 0 else value)
+
+        companion object {
+            /**
+             * The default count of stats for npcs.
+             */
+            const val DEFAULT_NPC_STAT_COUNT = 5
+        }
     }
 }

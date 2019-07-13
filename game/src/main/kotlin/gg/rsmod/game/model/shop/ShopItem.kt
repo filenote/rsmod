@@ -23,7 +23,7 @@ package gg.rsmod.game.model.shop
  *
  * @author Tom <rspsmods@gmail.com>
  */
-data class ShopItem(val item: Int, val amount: Int, val sellPrice: Int = -1, val buyPrice: Int = -1,
+data class ShopItem(val item: Int, val amount: Int, val sellPrice: Int? = null, val buyPrice: Int? = null,
                     val resupplyAmount: Int = Shop.DEFAULT_RESUPPLY_AMOUNT,
                     val resupplyCycles: Int = Shop.DEFAULT_RESUPPLY_CYCLES) {
 
@@ -31,4 +31,10 @@ data class ShopItem(val item: Int, val amount: Int, val sellPrice: Int = -1, val
      * The current amount of the item that is in stock.
      */
     var currentAmount: Int = amount
+
+    /**
+     * @return True if the item was not in the original shop stock.
+     */
+    val isTemporary: Boolean
+        get() = amount == 0
 }

@@ -11,6 +11,7 @@ import gg.rsmod.plugins.api.Skills
 import gg.rsmod.plugins.api.cfg.Items
 import gg.rsmod.plugins.api.ext.getSpellbook
 import gg.rsmod.plugins.api.ext.getVarbit
+import gg.rsmod.plugins.api.ext.message
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap
 
 /**
@@ -75,7 +76,7 @@ object MagicSpells {
     fun removeRunes(p: Player, items: List<Item>) {
         if (p.getVarbit(INF_RUNES_VARBIT) == 0) {
             for (item in items) {
-                /**
+                /*
                  * Do not remove staff item requirements.
                  */
                 if (item.id in STAFF_ITEMS) {
@@ -107,7 +108,7 @@ object MagicSpells {
 
                 val interfaceId = componentHash shr 16
                 val component = componentHash and 0xFFFF
-                val runes = arrayListOf<Item>()
+                val runes = mutableListOf<Item>()
 
                 if (params.containsKey(SPELL_RUNE1_ID_KEY)) {
                     runes.add(Item(params[SPELL_RUNE1_ID_KEY] as Int, params[SPELL_RUNE1_AMT_KEY] as Int))

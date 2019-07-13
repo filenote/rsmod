@@ -4,7 +4,10 @@ import com.google.common.base.MoreObjects
 import gg.rsmod.game.model.EntityType
 import gg.rsmod.game.model.PlayerUID
 import gg.rsmod.game.model.Tile
+import gg.rsmod.game.model.World
 import gg.rsmod.game.model.item.Item
+import gg.rsmod.game.model.item.ItemAttribute
+import java.util.EnumMap
 
 /**
  * An item that is spawned on the ground.
@@ -28,7 +31,9 @@ class GroundItem private constructor(val item: Int, var amount: Int, internal va
 
     internal var respawnCycles = -1
 
-    override fun getType(): EntityType = EntityType.GROUND_ITEM
+    internal val attr = EnumMap<ItemAttribute, Int>(ItemAttribute::class.java)
+
+    override val entityType: EntityType = EntityType.GROUND_ITEM
 
     fun isOwnedBy(p: Player): Boolean = ownerUID != null && p.uid.value == ownerUID!!.value
 
@@ -39,6 +44,13 @@ class GroundItem private constructor(val item: Int, var amount: Int, internal va
     fun removeOwner() {
         ownerUID = null
     }
+
+    fun copyAttr(attributes: Map<ItemAttribute, Int>): GroundItem {
+        attr.putAll(attributes)
+        return this
+    }
+
+    fun isSpawned(world: World): Boolean = world.isSpawned(this)
 
     override fun toString(): String = MoreObjects.toStringHelper(this).add("item", item).add("amount", amount).add("tile", tile.toString()).add("owner", ownerUID).toString()
 
